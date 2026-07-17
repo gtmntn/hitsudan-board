@@ -453,7 +453,8 @@
   /* ===== スマホ向け（狭い画面）調整 ===== */
   @media (max-width: 700px) {
     .keyHint { display: none; }   /* ソフトキーボードには不要 */
-    #memoBar .label { display: none; }  /* スマホでは「メモの文字」ラベルは省略 */
+    #memoBar .label { display: none; }    /* スマホでは「メモの文字」ラベルは省略 */
+    #memoBar .sizeVal { display: none; }  /* スマホでは数値表示も省略(＋−⇅の3ボタンのみ) */
     /* メモタブは小さく・最上部に・半透明にして筆談表示を邪魔しない */
     #memoTab {
       top: 8px;
@@ -932,8 +933,14 @@
   // ---- メモの逆さ表示(相手に見せる用。バーとボタンは回転しない) ----
   function applyMemoFlip() {
     document.getElementById('memoWrap').classList.toggle('flipped', state.memoFlipped);
-    document.getElementById('memoFlipBtn').textContent = state.memoFlipped ? '⇅ 戻す' : '⇅ 逆さ';
+    // スマホは記号のみ、PCは文言付き
+    document.getElementById('memoFlipBtn').textContent =
+      isSmallScreen ? '⇅' : (state.memoFlipped ? '⇅ 戻す' : '⇅ 逆さ');
     fitMemoBar();  // ボタンの文言が変わるので入りきるか再判定
+  }
+  if (isSmallScreen) {
+    document.getElementById('memoPlus').textContent = '＋';
+    document.getElementById('memoMinus').textContent = '−';
   }
   document.getElementById('memoFlipBtn').addEventListener('click', () => {
     state.memoFlipped = !state.memoFlipped;
