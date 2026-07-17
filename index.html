@@ -1,0 +1,1100 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<title>筆談ボード</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* ===== テーマ（黒地に白 / 白地に黒） ===== */
+  :root {
+    --bg-app: #111;
+    --bg-top: #000;
+    --fg-top: #fff;
+    --bg-bottom: #181818;
+    --fg-bottom: #fff;
+    --caret: #ffcc00;
+    --placeholder: #555;
+    --bg-divider: #2b2b2b;
+    --bg-divider-drag: #3a3a5a;
+    --border-divider: #444;
+    --bg-group: #1d1d1d;
+    --fg-label: #aaa;
+    --fg-sizeval: #ddd;
+    --bg-btn: #444;
+    --bg-btn-hover: #555;
+    --bg-btn-active: #666;
+    --fg-btn: #fff;
+    --bg-clear: #7a2020;
+    --bg-clear-hover: #963030;
+    --fg-hint: #999;
+    --bg-kbd: #333;
+    --border-kbd: #555;
+    --fg-kbd: #ddd;
+    --fg-grip: #777;
+    --c-red: #ff4545;    /* 黒背景で映える鮮やかな色 */
+    --c-blue: #47a8ff;
+    --c-green: #3ce85e;
+  }
+  body.light {
+    --bg-app: #e8e8e8;
+    --bg-top: #fff;
+    --fg-top: #000;
+    --bg-bottom: #f4f4f4;
+    --fg-bottom: #000;
+    --caret: #d97700;
+    --placeholder: #999;
+    --bg-divider: #d8d8d8;
+    --bg-divider-drag: #b8c4e0;
+    --border-divider: #b0b0b0;
+    --bg-group: #efefef;
+    --fg-label: #555;
+    --fg-sizeval: #333;
+    --bg-btn: #c8c8c8;
+    --bg-btn-hover: #b5b5b5;
+    --bg-btn-active: #a5a5a5;
+    --fg-btn: #111;
+    --bg-clear: #c0392b;
+    --bg-clear-hover: #a93226;
+    --fg-hint: #666;
+    --bg-kbd: #eee;
+    --border-kbd: #aaa;
+    --fg-kbd: #333;
+    --fg-grip: #999;
+    --c-red: #eb0029;    /* 白背景で映える鮮やかな色 */
+    --c-blue: #0062ff;
+    --c-green: #00b141;
+  }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg-app);
+    font-family: "Yu Gothic UI", "Meiryo", sans-serif;
+    overscroll-behavior: none;
+  }
+  /* iOSでキーボード表示時にページごと上へスクロールするのを防ぐ */
+  body {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+  }
+
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    transition: margin-right 0.25s ease;  /* メモパネルの開閉と同期 */
+  }
+  /* メモ表示中は筆談領域をメモの幅だけ狭めて、隠れないようにする(幅は--memoWで可変) */
+  body.memoOpen #app { margin-right: var(--memoW, 25%); }
+  body.memoResizing #app, body.memoResizing #memoPane { transition: none; }
+  @supports (height: 100dvh) {
+    #app { height: 100dvh; }
+  }
+
+  /* ===== 上：相手用（180度回転） ===== */
+  /* アクティブな領域(筆談 or メモ)が現在の文字色で縁取りされる(--edgeはJSが設定) */
+  #topPane, #bottomPane {
+    box-shadow: inset 0 0 0 4px var(--edge, transparent);
+  }
+  body.memoActive #topPane, body.memoActive #bottomPane { box-shadow: none; }
+  body.memoActive #memoPane { box-shadow: inset 0 0 0 4px var(--edge, transparent); }
+
+  /* 上下はflex-growの比率で分け合う。バーの高さが変わっても比率は保たれる */
+  #topPane {
+    flex: 66.7 1 0px;
+    min-height: 10%;
+    overflow: hidden;
+    background: var(--bg-top);
+    position: relative;
+  }
+  #topText {
+    transform: rotate(180deg);
+    height: 100%;
+    width: 100%;
+    overflow-y: auto;
+    padding: 20px 28px;
+    color: var(--fg-top);
+    font-size: 128px;
+    font-weight: 700;
+    line-height: 1.35;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  /* ===== 仕切りバー（ドラッグで上下サイズ変更） ===== */
+  #divider {
+    position: relative;
+    flex: 0 0 auto;
+    background: var(--bg-divider);
+    border-top: 1px solid var(--border-divider);
+    border-bottom: 1px solid var(--border-divider);
+    cursor: ns-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    padding: 8px 12px;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+    flex-wrap: wrap;
+  }
+  #divider.dragging { background: var(--bg-divider-drag); }
+
+  .ctrlGroup {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-group);
+    border-radius: 8px;
+    padding: 4px 10px;
+  }
+  .ctrlGroup .label {
+    color: var(--fg-label);
+    font-size: 14px;
+    margin-right: 4px;
+  }
+  .ctrlGroup .sizeVal {
+    color: var(--fg-sizeval);
+    font-size: 14px;
+    min-width: 44px;
+    text-align: center;
+  }
+  .colorOpt {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .colorOpt input { accent-color: currentColor; cursor: pointer; }
+  button {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--fg-btn);
+    background: var(--bg-btn);
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  button:hover { background: var(--bg-btn-hover); }
+  button:active { background: var(--bg-btn-active); }
+  #clearBtn {
+    background: var(--bg-clear);
+    color: #fff;
+    padding: 6px 20px;
+    font-size: 15px;
+  }
+  #clearBtn:hover { background: var(--bg-clear-hover); }
+  #themeBtn, #modeBtn, #recBtn { font-size: 15px; }
+  #recBtn.rec {
+    background: #d40000;
+    color: #fff;
+    animation: recPulse 1.6s infinite;
+  }
+  @keyframes recPulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.65; }
+  }
+
+  /* バー上端いっぱいに広がる「つまみ」。ここを上下にドラッグして比率変更 */
+  #dragHandle {
+    display: flex;
+    position: relative;
+    width: 100%;
+    justify-content: center;
+    align-items: center;
+    padding: 4px 0 6px;
+    min-height: 28px;
+  }
+  #dragHandle span {
+    width: 140px;
+    height: 7px;
+    border-radius: 4px;
+    background: var(--fg-grip);
+    pointer-events: none;
+  }
+  #collapseBtn {
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 12px;
+    font-weight: 400;
+    padding: 4px 10px;
+    background: var(--bg-group);
+    color: var(--fg-label);
+  }
+  /* 格納状態: つまみ・クリア・設定ボタンだけ残して他の設定類を隠す */
+  body.barCollapsed .ctrlGroup,
+  body.barCollapsed #themeBtn,
+  body.barCollapsed #modeBtn,
+  body.barCollapsed #recBtn,
+  body.barCollapsed .keyHint { display: none; }
+  body.barCollapsed #divider { padding: 2px 8px; }
+  body.barCollapsed #clearBtn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 12px;
+    padding: 4px 12px;
+  }
+
+  .keyHint {
+    color: var(--fg-hint);
+    font-size: 13px;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  .keyHint kbd {
+    display: inline-block;
+    background: var(--bg-kbd);
+    border: 1px solid var(--border-kbd);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-family: inherit;
+    font-size: 12px;
+    color: var(--fg-kbd);
+    margin: 0 2px;
+  }
+
+  /* ===== 下：自分用（入力・確認） ===== */
+  #bottomPane {
+    flex: 33.3 1 0px;
+    min-height: 10%;
+    background: var(--bg-bottom);
+    overflow: hidden;
+    display: flex;
+    position: relative;
+  }
+  /* 入力欄は文字を透明にし、背後の#inputBackが色付きで同じ文字を描画する */
+  #inputArea {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    resize: none;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: transparent;
+    font-family: inherit;
+    font-size: 24px;
+    line-height: 1.4;
+    padding: 16px 24px;
+    caret-color: var(--caret);
+    word-break: break-all;
+    position: relative;
+    z-index: 1;
+  }
+  #inputArea::placeholder { color: var(--placeholder); }
+  #inputBack {
+    position: absolute;
+    inset: 0;
+    padding: 16px 24px;
+    color: var(--fg-bottom);
+    font-size: 24px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-all;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  /* ===== メモパネル（右端から幅1/4でスライド表示） ===== */
+  #memoPane {
+    position: fixed;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: var(--memoW, 25%);
+    background: var(--bg-divider);
+    border-left: 2px solid var(--border-divider);
+    transform: translateX(100%);
+    transition: transform 0.25s ease;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    box-shadow: -4px 0 12px rgba(0, 0, 0, 0.25);
+  }
+  #memoPane.open { transform: translateX(0); }
+  /* 閉じている間はパネルの中身を完全に隠す(タブ以外何も見えない状態にする) */
+  #memoPane:not(.open) #memoBar,
+  #memoPane:not(.open) #memoWrap,
+  #memoPane:not(.open) #memoResize { visibility: hidden; }
+  #memoTab {
+    position: absolute;
+    left: -28px;  /* パネルの境界線(2px)の分も含めて外側へ */
+    top: 50%;
+    transform: translateY(-50%);
+    width: 26px;
+    height: 110px;
+    writing-mode: vertical-rl;
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: 3px;
+    background: var(--bg-group);
+    color: var(--fg-label);
+    border: 1px solid var(--border-divider);
+    border-right: none;
+    border-radius: 8px 0 0 8px;
+    padding: 0;
+    cursor: pointer;
+  }
+  #memoBar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 10px 8px;
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+  #memoBar .label { color: var(--fg-label); font-size: 13px; margin-right: 4px; white-space: nowrap; }
+  #memoBar .sizeVal { color: var(--fg-sizeval); font-size: 14px; min-width: 34px; text-align: center; }
+  #memoBar button { font-size: 15px; padding: 4px 12px; }
+  /* パネル幅が狭くて入りきらないときは段階的に小型化(判定はJS) */
+  #memoPane.barNarrow #memoBar { gap: 3px; }
+  #memoPane.barNarrow #memoBar .label { font-size: 11px; margin-right: 2px; }
+  #memoPane.barNarrow #memoBar .sizeVal { font-size: 12px; min-width: 24px; }
+  #memoPane.barNarrow #memoBar button { font-size: 12px; padding: 3px 8px; }
+  #memoPane.barTiny #memoBar .label { display: none; }
+  #memoPane.barTiny #memoBar .sizeVal { font-size: 10px; min-width: 18px; }
+  #memoPane.barTiny #memoBar button { font-size: 10px; padding: 2px 6px; }
+
+  /* メモも筆談と同じく、透明文字のテキストエリアの背後に色付き文字(#memoBack)を重ねる */
+  #memoWrap {
+    flex: 1;
+    position: relative;
+    margin: 10px;
+  }
+  /* 逆さ表示: 表示・入力領域だけ180度回転(バーとボタンは不動) */
+  #memoWrap.flipped { transform: rotate(180deg); }
+  #memoInput {
+    width: 100%;
+    height: 100%;
+    resize: none;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: transparent;
+    caret-color: var(--caret);
+    font-family: inherit;
+    font-size: 18px;
+    line-height: 1.5;
+    padding: 12px;
+    border-radius: 6px;
+    word-break: break-all;
+    position: relative;
+    z-index: 1;
+  }
+  #memoInput::placeholder { color: var(--placeholder); }
+  #memoBack {
+    position: absolute;
+    inset: 0;
+    background: var(--bg-bottom);
+    color: var(--fg-top);
+    font-size: 18px;
+    line-height: 1.5;
+    padding: 12px;
+    border-radius: 6px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  /* メモ左端のドラッグ用エッジ(横幅の変更) */
+  #memoResize {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 12px;
+    cursor: ew-resize;
+    touch-action: none;
+    z-index: 1;
+  }
+  #memoResize:hover { background: rgba(128, 128, 128, 0.25); }
+
+  /* ===== 画面点滅（ESCキーで相手に注意を促す） ===== */
+  #flash {
+    position: fixed;
+    inset: 0;
+    background: var(--fg-top);  /* 背景と反対の色で点滅 */
+    opacity: 0;
+    pointer-events: none;
+    z-index: 99;
+  }
+  #flash.on { animation: blinkFlash 0.28s 1; }
+  @keyframes blinkFlash {
+    0%, 100% { opacity: 0; }
+    50%      { opacity: 1; }
+  }
+
+  /* ===== 一画面モード（隣で同じ向きに見る） ===== */
+  body.solo #topPane { display: none; }
+  body.solo #topCtrl { display: none; }
+  body.solo #dragHandle span { visibility: hidden; }  /* 一画面時はつまみだけ隠す（格納ボタンは残す） */
+  body.solo #divider { cursor: default; }
+  body.solo #inputBack { color: var(--fg-top); }
+
+  /* ===== スマホ向け（狭い画面）調整 ===== */
+  @media (max-width: 700px) {
+    .keyHint { display: none; }   /* ソフトキーボードには不要 */
+    #memoBar .label { display: none; }  /* スマホでは「メモの文字」ラベルは省略 */
+    /* メモタブは小さく・最上部に・半透明にして筆談表示を邪魔しない */
+    #memoTab {
+      top: 8px;
+      transform: none;
+      height: 60px;
+      width: 22px;
+      left: -23px;
+      font-size: 11px;
+      letter-spacing: 2px;
+      opacity: 0.45;
+    }
+    #memoPane.open #memoTab { opacity: 1; }  /* 開いている間は閉じるボタンとして見やすく */
+    #divider { gap: 8px; padding: 6px 8px; }
+    .ctrlGroup { padding: 4px 6px; gap: 4px; }
+    .ctrlGroup .label { font-size: 12px; margin-right: 2px; }
+    .ctrlGroup .sizeVal { font-size: 13px; min-width: 34px; }
+    button { font-size: 17px; padding: 10px 12px; }   /* 指で押しやすく */
+    #clearBtn { padding: 10px 14px; font-size: 14px; }
+    #themeBtn, #modeBtn, #recBtn { font-size: 14px; padding: 10px 10px; }
+    .colorOpt input { width: 20px; height: 20px; }
+    #topText { padding: 12px 14px; }
+    #inputArea, #inputBack { padding: 10px 14px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topPane">
+    <div id="topText"></div>
+  </div>
+
+  <div id="divider">
+    <div id="dragHandle"><span></span><button id="collapseBtn">▲ 格納</button></div>
+    <div class="ctrlGroup" id="topCtrl">
+      <span class="label">上の文字</span>
+      <button id="topMinus">A−</button>
+      <span class="sizeVal" id="topSizeVal">128</span>
+      <button id="topPlus">A＋</button>
+    </div>
+    <button id="clearBtn">クリア</button>
+    <button id="themeBtn">◐ 反転</button>
+    <button id="modeBtn">1画面</button>
+    <button id="recBtn">● 記録</button>
+    <div class="ctrlGroup" id="colorCtrl">
+      <span class="label">文字色</span>
+      <label class="colorOpt" style="color: var(--fg-top)"><input type="checkbox" id="ckDefault" checked><span id="defaultColorName">黒</span></label>
+      <label class="colorOpt" style="color: var(--c-red)"><input type="checkbox" id="ckRed" checked>赤</label>
+      <label class="colorOpt" style="color: var(--c-blue)"><input type="checkbox" id="ckBlue">青</label>
+      <label class="colorOpt" style="color: var(--c-green)"><input type="checkbox" id="ckGreen">緑</label>
+    </div>
+    <span class="keyHint"><kbd>Tab</kbd>文字色　<kbd>Esc</kbd>画面点滅　<kbd>Delete</kbd>全消去　<kbd>Ctrl+←/→</kbd>メモ切替</span>
+    <div class="ctrlGroup">
+      <span class="label" id="botLabel">下の文字</span>
+      <button id="botMinus">A−</button>
+      <span class="sizeVal" id="botSizeVal">24</span>
+      <button id="botPlus">A＋</button>
+    </div>
+  </div>
+
+  <div id="bottomPane">
+    <div id="inputBack"></div>
+    <textarea id="inputArea" placeholder="ここに文字を入力してください" autofocus></textarea>
+  </div>
+
+  <div id="flash"></div>
+</div>
+
+<div id="memoPane">
+  <div id="memoResize"></div>
+  <button id="memoTab">メモ</button>
+  <div id="memoWrap">
+    <div id="memoBack"></div>
+    <textarea id="memoInput" placeholder="メモ（この内容も記録されます）"></textarea>
+  </div>
+  <div id="memoBar">
+    <span class="label">メモの文字</span>
+    <button id="memoMinus">A−</button>
+    <span class="sizeVal" id="memoSizeVal">18</span>
+    <button id="memoPlus">A＋</button>
+    <button id="memoFlipBtn">⇅ 逆さ</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  const app       = document.getElementById('app');
+  const topPane   = document.getElementById('topPane');
+  const topText   = document.getElementById('topText');
+  const divider   = document.getElementById('divider');
+  const inputArea = document.getElementById('inputArea');
+  const inputBack = document.getElementById('inputBack');
+  const memoPane  = document.getElementById('memoPane');
+  const memoInput = document.getElementById('memoInput');
+  const topSizeVal = document.getElementById('topSizeVal');
+  const botSizeVal = document.getElementById('botSizeVal');
+
+  const LS = 'hitsudanBoard';
+  // 画面幅に応じた初期値（保存済み設定があればそちらを優先）
+  const isSmallScreen = window.matchMedia('(max-width: 700px)').matches;
+  const defaults = isSmallScreen
+    ? { topSize: 40,  botSize: 20, soloSize: 40, splitPct: 55,   theme: 'light', mode: 'duo', barCollapsed: false }
+    : { topSize: 128, botSize: 24, soloSize: 64, splitPct: 66.7, theme: 'light', mode: 'duo', barCollapsed: false };
+  defaults.colors = { default: true, red: true, blue: false, green: false };  // Tabで巡回する色の有効設定
+  defaults.color = 'default';
+  defaults.memo = '';
+  defaults.memoWidth = isSmallScreen ? 60 : 25;  // メモパネルの幅(%)
+  defaults.memoSize = isSmallScreen ? 16 : 18;   // メモの文字サイズ
+  defaults.memoColor = 'default';                // メモ側の現在色(筆談とは独立)
+  defaults.memoFlipped = false;                  // メモの逆さ表示
+  const state = Object.assign({}, defaults, JSON.parse(localStorage.getItem(LS) || '{}'));
+  if (state.colors.default === undefined) state.colors.default = true;  // 旧保存データの移行
+
+  function save() { localStorage.setItem(LS, JSON.stringify(state)); }
+
+  function applySizes() {
+    // 一画面モードでは入力欄が唯一の表示なので専用サイズ(soloSize)を使う
+    const bottomSize = (state.mode === 'solo') ? state.soloSize : state.botSize;
+    topText.style.fontSize   = state.topSize + 'px';
+    inputArea.style.fontSize = bottomSize + 'px';
+    inputBack.style.fontSize = bottomSize + 'px';
+    topSizeVal.textContent = state.topSize;
+    botSizeVal.textContent = bottomSize;
+    scrollToLatest();
+  }
+
+  function applyMode() {
+    const solo = (state.mode === 'solo');
+    document.body.classList.toggle('solo', solo);
+    document.getElementById('modeBtn').textContent = solo ? '2画面' : '1画面';
+    document.getElementById('botLabel').textContent = solo ? '文字' : '下の文字';
+    applySizes();
+  }
+
+  function applySplit() {
+    // flex-growの比率で分けるので、バーの高さが変わっても上下の比率は保たれる
+    topPane.style.flexGrow = state.splitPct;
+    document.getElementById('bottomPane').style.flexGrow = 100 - state.splitPct;
+  }
+
+  // ---- 現在色（これから入力する文字の色。Tabで有効色を巡回） ----
+  function colorValue(c) {
+    return (c !== 'default' && COLOR_VALUES[c]) ? COLOR_VALUES[c] : '';
+  }
+
+  function applyColor() {
+    inputArea.style.caretColor = colorValue(state.color);      // 空文字ならCSS既定のキャレット色
+    memoInput.style.caretColor = colorValue(state.memoColor);
+    // 縁取りはアクティブな側の現在色(既定色のときはテーマの黒/白)
+    const memoActive = document.body.classList.contains('memoActive');
+    const edge = memoActive ? colorValue(state.memoColor) : colorValue(state.color);
+    document.body.style.setProperty('--edge', edge || 'var(--fg-top)');
+  }
+
+  function enabledColorList() {
+    const list = [];
+    ['default', 'red', 'blue', 'green'].forEach(c => { if (state.colors[c]) list.push(c); });
+    return list.length ? list : ['default'];  // 全部OFFなら既定色だけ
+  }
+
+  function cycleColor() {
+    // アクティブな側(筆談 or メモ)の現在色だけを巡回する
+    const list = enabledColorList();
+    if (document.body.classList.contains('memoActive')) {
+      state.memoColor = list[(list.indexOf(state.memoColor) + 1) % list.length];
+      addBoundaryIn(memoRuns, memoInput.value.length, state.memoColor);
+      state.memoRuns = memoRuns;
+    } else {
+      state.color = list[(list.indexOf(state.color) + 1) % list.length];
+      addBoundaryIn(runs, inputArea.value.length, state.color);
+    }
+    applyColor();
+    save();
+  }
+
+  function applyBar() {
+    document.body.classList.toggle('barCollapsed', state.barCollapsed);
+    document.getElementById('collapseBtn').textContent = state.barCollapsed ? '▼ 設定' : '▲ 格納';
+    scrollToLatest();
+  }
+
+  function applyTheme() {
+    document.body.classList.toggle('light', state.theme === 'light');
+    // 既定色のチェックボックスのラベルはテーマの文字色に合わせる
+    document.getElementById('defaultColorName').textContent = (state.theme === 'light') ? '黒' : '白';
+  }
+
+  function scrollToLatest() {
+    // 上ペインは要素ごと180度回転しているため、scrollTop最大＝最新行が見える
+    topText.scrollTop = topText.scrollHeight;
+    inputArea.scrollTop = inputArea.scrollHeight;
+    inputBack.scrollTop = inputArea.scrollTop;
+  }
+
+  // ---- 話者ごとの色付き区間（runs） ----
+  // runs[i] = {start: 文字位置, color: 色名}。Tabで現在色を切り替えると
+  // それ以降に入力した文字だけが新しい色になり、過去の文字は各自の色を保つ。
+  const COLOR_VALUES = { red: 'var(--c-red)', blue: 'var(--c-blue)', green: 'var(--c-green)' };
+  let runs = [{ start: 0, color: state.color }];
+  let prevText = '';
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function buildHTML(text, runsArr) {
+    let html = '';
+    for (let i = 0; i < runsArr.length; i++) {
+      const s = runsArr[i].start;
+      const e = (i + 1 < runsArr.length) ? runsArr[i + 1].start : text.length;
+      if (e <= s) continue;
+      const seg = escapeHtml(text.slice(s, e));
+      const c = runsArr[i].color;
+      html += (c === 'default' || !COLOR_VALUES[c])
+        ? '<span>' + seg + '</span>'
+        : '<span style="color:' + COLOR_VALUES[c] + '">' + seg + '</span>';
+    }
+    if (text.endsWith('\n')) html += '​'; // 末尾改行の行も高さを持たせる(ゼロ幅スペース)
+    return html;
+  }
+
+  function renderAll() {
+    const html = buildHTML(inputArea.value, runs);
+    topText.innerHTML = html;
+    inputBack.innerHTML = html;
+    scrollToLatest();
+  }
+
+  // テキスト編集位置に合わせて色区間の開始位置をずらす(新しい配列を返す)
+  function shiftRunsIn(arr, oldT, newT) {
+    if (oldT === newT) return arr;
+    let i = 0;
+    const min = Math.min(oldT.length, newT.length);
+    while (i < min && oldT[i] === newT[i]) i++;
+    const delta = newT.length - oldT.length;
+    arr.forEach(r => {
+      if (r.start > i) r.start = Math.max(i, r.start + delta);
+      if (r.start > newT.length) r.start = newT.length;
+    });
+    // 同じ開始位置に潰れた区間は最後の色だけ残す
+    const merged = [];
+    arr.forEach(r => {
+      if (merged.length && merged[merged.length - 1].start === r.start) merged[merged.length - 1] = r;
+      else merged.push(r);
+    });
+    return merged;
+  }
+
+  // 現在位置(末尾)から新しい色の区間を開始する
+  function addBoundaryIn(arr, len, color) {
+    const last = arr[arr.length - 1];
+    if (last.start === len) last.color = color;
+    else arr.push({ start: len, color: color });
+  }
+
+  inputArea.addEventListener('input', () => {
+    const newText = inputArea.value;
+    runs = shiftRunsIn(runs, prevText, newText);
+    prevText = newText;
+    renderAll();
+    recSaveBackup();  // 記録中は入力のたびにバックアップ
+  });
+  inputArea.addEventListener('scroll', () => { inputBack.scrollTop = inputArea.scrollTop; });
+
+  // ---- フォントサイズ変更（8px刻み、16〜300px） ----
+  function step(cur, dir) {
+    return Math.min(300, Math.max(16, cur + dir * 8));
+  }
+  document.getElementById('topPlus').addEventListener('click', () => { state.topSize = step(state.topSize, +1); applySizes(); save(); });
+  document.getElementById('topMinus').addEventListener('click', () => { state.topSize = step(state.topSize, -1); applySizes(); save(); });
+  function bumpBottom(dir) {
+    if (state.mode === 'solo') state.soloSize = step(state.soloSize, dir);
+    else                       state.botSize  = step(state.botSize, dir);
+    applySizes(); save();
+  }
+  document.getElementById('botPlus').addEventListener('click', () => bumpBottom(+1));
+  document.getElementById('botMinus').addEventListener('click', () => bumpBottom(-1));
+
+  // ---- 記録（会話ログ） ----
+  // 記録中は、クリアや停止の時点の本文をログに積み、停止時にテキストファイルで保存する。
+  // 記録中の内容はlocalStorageにも逐次バックアップし、誤ってページを閉じても消えない。
+  const REC_KEY = 'hitsudanRecLog';
+  let rec = null;  // {start: 開始時刻, entries: [{time, text}]}
+
+  function recSaveBackup() {
+    if (rec) localStorage.setItem(REC_KEY, JSON.stringify({ start: rec.start, entries: rec.entries, pending: inputArea.value, pendingMemo: memoInput.value }));
+  }
+
+  function recSnapshot() {
+    if (!rec) return;
+    if (inputArea.value.trim()) rec.entries.push({ time: Date.now(), text: inputArea.value });
+    recSaveBackup();
+  }
+
+  function fmtTime(ts) {
+    const d = new Date(ts);
+    const p = n => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  function recDownload() {
+    const body = rec.entries.length
+      ? rec.entries.map(e => '----------\n[' + fmtTime(e.time) + ']\n' + e.text).join('\n')
+      : '（記録された文字はありませんでした）';
+    const memoSection = memoInput.value.trim() ? '\n----------\n[メモ]\n' + memoInput.value : '';
+    const content = '﻿筆談ログ（開始 ' + fmtTime(rec.start) + '）\n' + body + memoSection + '\n';
+    const d = new Date(rec.start);
+    const p = n => String(n).padStart(2, '0');
+    const fname = '筆談ログ_' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes()) + '.txt';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
+    a.download = fname;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function applyRec() {
+    const btn = document.getElementById('recBtn');
+    btn.textContent = rec ? '■ 停止' : '● 記録';
+    btn.classList.toggle('rec', !!rec);
+  }
+
+  document.getElementById('recBtn').addEventListener('click', () => {
+    if (!rec) {
+      rec = { start: Date.now(), entries: [] };
+      recSaveBackup();
+    } else {
+      recSnapshot();
+      recDownload();
+      rec = null;
+      localStorage.removeItem(REC_KEY);
+    }
+    applyRec();
+    inputArea.focus();
+  });
+
+  // 前回記録中にページが閉じられていた場合は記録を再開する
+  (function restoreRec() {
+    const saved = localStorage.getItem(REC_KEY);
+    if (!saved) return;
+    try {
+      const b = JSON.parse(saved);
+      rec = { start: b.start, entries: b.entries || [] };
+      if (b.pending && b.pending.trim()) rec.entries.push({ time: b.start, text: b.pending });
+    } catch (e) { localStorage.removeItem(REC_KEY); }
+  })();
+
+  // ---- クリア ----
+  function clearAll() {
+    recSnapshot();  // 記録中なら消える前の本文をログへ
+    inputArea.value = '';
+    prevText = '';
+    runs = [{ start: 0, color: state.color }];
+    renderAll();
+    inputArea.focus();
+  }
+  document.getElementById('clearBtn').addEventListener('click', clearAll);
+
+  // ---- ESCキーで画面点滅（注意喚起）、DELキーで一括削除 ----
+  const flash = document.getElementById('flash');
+  function blinkScreen() {
+    flash.classList.remove('on');
+    void flash.offsetWidth;  // アニメーションを最初から再生し直すためのリフロー
+    flash.classList.add('on');
+  }
+  flash.addEventListener('animationend', () => flash.classList.remove('on'));
+
+  document.addEventListener('keydown', (e) => {
+    if (e.isComposing) return;  // 日本語変換中のキーは変換操作なので無視
+    // Ctrl+← / Ctrl+→ で筆談⇔メモのフォーカスをトグル(メモ入力中でも効く)
+    if (e.ctrlKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      e.preventDefault();
+      if (document.activeElement === memoInput) {
+        inputArea.focus();
+        setActive(false);
+      } else {
+        setMemoOpen(true);
+        memoInput.focus();
+        setActive(true);
+      }
+      return;
+    }
+    // TabとEscはメモ入力中でも効く
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      blinkScreen();
+      return;
+    }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      cycleColor();
+      return;
+    }
+    if (e.target === memoInput) return;  // メモ入力中のDeleteは通常の編集キー(全消去しない)
+    if (e.key === 'Delete') {
+      e.preventDefault();
+      clearAll();
+    }
+  });
+
+  // ---- アクティブな領域(筆談/メモ)の縁取り表示 ----
+  function setActive(memo) {
+    document.body.classList.toggle('memoActive', memo);
+    applyColor();  // 縁取りをアクティブ側の現在色に更新
+  }
+  inputArea.addEventListener('focus', () => setActive(false));
+  memoInput.addEventListener('focus', () => setActive(true));
+  // クリック/タップでも確実に切り替える(フォーカスイベントの取りこぼし対策)
+  inputArea.addEventListener('pointerdown', () => setActive(false));
+  memoInput.addEventListener('pointerdown', () => setActive(true));
+
+  // ---- 文字色チェックボックス ----
+  [['default', 'ckDefault'], ['red', 'ckRed'], ['blue', 'ckBlue'], ['green', 'ckGreen']].forEach(([name, id]) => {
+    const ck = document.getElementById(id);
+    ck.checked = !!state.colors[name];
+    ck.addEventListener('change', () => {
+      state.colors[name] = ck.checked;
+      if (!ck.checked) {
+        // 使用中の色を外したら残りの先頭色へ（過去の文字はそのまま）
+        if (state.color === name) {
+          state.color = enabledColorList()[0];
+          addBoundaryIn(runs, inputArea.value.length, state.color);
+        }
+        if (state.memoColor === name) {
+          state.memoColor = enabledColorList()[0];
+          addBoundaryIn(memoRuns, memoInput.value.length, state.memoColor);
+          state.memoRuns = memoRuns;
+        }
+      }
+      applyColor();
+      save();
+      inputArea.focus();
+    });
+  });
+
+  // ---- 白黒テーマ切り替え ----
+  document.getElementById('themeBtn').addEventListener('click', () => {
+    state.theme = (state.theme === 'light') ? 'dark' : 'light';
+    applyTheme();
+    save();
+    inputArea.focus();
+  });
+
+  // ---- メモパネル（右端のタブで開閉。内容は保存され、記録にも含まれる） ----
+  memoInput.value = state.memo || '';
+
+  // メモの色区間(本文と一緒に保存・復元する)
+  const memoBack = document.getElementById('memoBack');
+  let memoRuns = (Array.isArray(state.memoRuns) && state.memoRuns.length && state.memoRuns[0].start === 0)
+    ? state.memoRuns.map(r => ({ start: Math.min(r.start, memoInput.value.length), color: r.color }))
+    : [{ start: 0, color: 'default' }];
+  let memoPrev = memoInput.value;
+
+  function renderMemo() {
+    memoBack.innerHTML = buildHTML(memoInput.value, memoRuns);
+    memoBack.scrollTop = memoInput.scrollTop;
+  }
+  memoInput.addEventListener('scroll', () => { memoBack.scrollTop = memoInput.scrollTop; });
+
+  // ---- メモの文字サイズ(筆談とは独立、2px刻み 12〜80px) ----
+  function applyMemoSize() {
+    memoInput.style.fontSize = state.memoSize + 'px';
+    memoBack.style.fontSize = state.memoSize + 'px';
+    document.getElementById('memoSizeVal').textContent = state.memoSize;
+    memoBack.scrollTop = memoInput.scrollTop;
+  }
+  function bumpMemoSize(dir) {
+    state.memoSize = Math.min(80, Math.max(12, state.memoSize + dir * 2));
+    applyMemoSize();
+    save();
+    memoInput.focus();
+    setActive(true);
+  }
+  document.getElementById('memoPlus').addEventListener('click', () => bumpMemoSize(+1));
+  document.getElementById('memoMinus').addEventListener('click', () => bumpMemoSize(-1));
+
+  // ---- メモの逆さ表示(相手に見せる用。バーとボタンは回転しない) ----
+  function applyMemoFlip() {
+    document.getElementById('memoWrap').classList.toggle('flipped', state.memoFlipped);
+    document.getElementById('memoFlipBtn').textContent = state.memoFlipped ? '⇅ 戻す' : '⇅ 逆さ';
+    fitMemoBar();  // ボタンの文言が変わるので入りきるか再判定
+  }
+  document.getElementById('memoFlipBtn').addEventListener('click', () => {
+    state.memoFlipped = !state.memoFlipped;
+    applyMemoFlip();
+    save();
+    memoInput.focus();
+    setActive(true);
+  });
+
+  function setMemoOpen(open) {
+    memoPane.classList.toggle('open', open);
+    document.body.classList.toggle('memoOpen', open);  // 筆談領域をメモの幅だけ狭める
+  }
+
+  document.getElementById('memoTab').addEventListener('click', () => {
+    const open = !memoPane.classList.contains('open');
+    setMemoOpen(open);
+    if (open) { memoInput.focus(); setActive(true); }
+    else      { inputArea.focus(); setActive(false); }
+  });
+  memoInput.addEventListener('input', () => {
+    memoRuns = shiftRunsIn(memoRuns, memoPrev, memoInput.value);
+    memoPrev = memoInput.value;
+    renderMemo();
+    state.memo = memoInput.value;
+    state.memoRuns = memoRuns;
+    save();
+    recSaveBackup();
+  });
+
+  // ---- メモパネルの幅を左端ドラッグで変更 ----
+  // バーが入りきらない幅では段階的に小型化する(barNarrow → barTiny)
+  const memoBar = document.getElementById('memoBar');
+  function fitMemoBar() {
+    memoPane.classList.remove('barNarrow', 'barTiny');
+    if (memoBar.scrollWidth > memoBar.clientWidth) {
+      memoPane.classList.add('barNarrow');
+      if (memoBar.scrollWidth > memoBar.clientWidth) {
+        memoPane.classList.add('barTiny');
+      }
+    }
+  }
+
+  function applyMemoWidth() {
+    document.body.style.setProperty('--memoW', state.memoWidth + '%');
+    fitMemoBar();
+  }
+  window.addEventListener('resize', fitMemoBar);
+  const memoResize = document.getElementById('memoResize');
+  let memoDragging = false;
+  memoResize.addEventListener('pointerdown', (e) => {
+    memoDragging = true;
+    document.body.classList.add('memoResizing');  // ドラッグ中はアニメーションを切って追従させる
+    try { memoResize.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  memoResize.addEventListener('pointermove', (e) => {
+    if (!memoDragging) return;
+    let pct = (window.innerWidth - e.clientX) / window.innerWidth * 100;
+    pct = Math.min(80, Math.max(15, pct));
+    state.memoWidth = Math.round(pct * 10) / 10;
+    applyMemoWidth();
+  });
+  memoResize.addEventListener('pointerup', (e) => {
+    if (!memoDragging) return;
+    memoDragging = false;
+    document.body.classList.remove('memoResizing');
+    try { memoResize.releasePointerCapture(e.pointerId); } catch (err) {}
+    save();
+  });
+
+  // ---- 設定バーの格納（スマホ用） ----
+  document.getElementById('collapseBtn').addEventListener('click', () => {
+    state.barCollapsed = !state.barCollapsed;
+    applyBar();
+    save();
+    inputArea.focus();
+  });
+
+  // ---- 一画面 ⇔ 上下二画面 ----
+  document.getElementById('modeBtn').addEventListener('click', () => {
+    state.mode = (state.mode === 'solo') ? 'duo' : 'solo';
+    applyMode();
+    save();
+    inputArea.focus();
+  });
+
+  // ---- 仕切りバー: ドラッグで上下比率を変更、タッチのタップで色切り替え(Tab相当) ----
+  let dragging = false;
+  let tapInfo = null;  // {y, moved, touch} タップ判定用
+  divider.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button, label, input')) return; // ボタン・チェックボックス操作は対象外
+    tapInfo = { y: e.clientY, moved: 0, touch: e.pointerType === 'touch' };
+    if (state.mode === 'solo') return;         // 一画面モードでは分割ドラッグなし(タップ判定のみ)
+    dragging = true;
+    divider.classList.add('dragging');
+    try { divider.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  divider.addEventListener('pointermove', (e) => {
+    if (tapInfo) tapInfo.moved = Math.max(tapInfo.moved, Math.abs(e.clientY - tapInfo.y));
+    if (!dragging) return;
+    // 比率は「バーを除いた領域」に対する上ペインの割合
+    const divH = divider.offsetHeight;
+    const avail = app.clientHeight - divH;
+    let pct = ((e.clientY - app.getBoundingClientRect().top - divH / 2) / avail) * 100;
+    pct = Math.min(85, Math.max(10, pct));
+    state.splitPct = Math.round(pct * 10) / 10;
+    applySplit();
+  });
+  divider.addEventListener('pointerup', (e) => {
+    if (dragging) {
+      dragging = false;
+      divider.classList.remove('dragging');
+      try { divider.releasePointerCapture(e.pointerId); } catch (err) {}
+      save();
+      scrollToLatest();
+    }
+    // ほぼ動かさずに離した「タップ」は色切り替え(スマホでのTabキー代わり)
+    if (tapInfo && tapInfo.touch && tapInfo.moved < 8) {
+      cycleColor();
+      inputArea.focus();  // ソフトキーボードを閉じさせない
+    }
+    tapInfo = null;
+  });
+
+  // ---- ソフトキーボード対応（iOS/Android）----
+  // キーボードが出ると visualViewport が縮むので、アプリ全体をその高さに合わせる
+  if (window.visualViewport) {
+    const fitToViewport = () => {
+      if (window.visualViewport.scale !== 1) return; // ピンチズーム中は無視
+      app.style.height = window.visualViewport.height + 'px';
+      memoPane.style.height = window.visualViewport.height + 'px';
+      window.scrollTo(0, 0);
+      scrollToLatest();
+    };
+    window.visualViewport.addEventListener('resize', fitToViewport);
+    // iOSがページごと上へずらしたときも即座に先頭へ戻す
+    window.visualViewport.addEventListener('scroll', fitToViewport);
+  }
+  window.addEventListener('scroll', () => { if (window.scrollY) window.scrollTo(0, 0); });
+  // フォーカス時(キーボード出現アニメーション後)のずれも戻す
+  inputArea.addEventListener('focus', () => {
+    setTimeout(() => window.scrollTo(0, 0), 100);
+    setTimeout(() => window.scrollTo(0, 0), 400);
+  });
+
+  // ---- ペインをクリックしたら入力欄へフォーカスを戻す ----
+  topPane.addEventListener('click', () => { inputArea.focus(); setActive(false); });
+
+  applySizes();
+  applySplit();
+  applyTheme();
+  applyMode();
+  applyBar();
+  applyColor();
+  applyRec();
+  applyMemoWidth();
+  applyMemoSize();
+  applyMemoFlip();
+  renderMemo();
+  inputArea.focus();
+})();
+</script>
+</body>
+</html>
