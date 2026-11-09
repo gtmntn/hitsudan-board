@@ -253,6 +253,22 @@
     padding: 4px 12px;
   }
 
+  /* ===== 面(筆談の2枚の面)の切り替えボタン ===== */
+  .faceBtn { min-width: 40px; padding: 6px 10px; }
+  .faceBtn.active { background: var(--fg-top); color: var(--bg-top); }  /* 表示中の面は反転色で強調 */
+  /* 格納時もクリアの左隣に表示する(会話中に頻繁に使うため) */
+  body.barCollapsed #faceCtrl {
+    display: flex;
+    position: absolute;
+    right: 76px;
+    top: 50%;
+    transform: translateY(-50%);
+    padding: 2px 4px;
+    gap: 3px;
+  }
+  body.barCollapsed #faceCtrl .label { display: none; }
+  body.barCollapsed .faceBtn { font-size: 12px; padding: 3px 8px; min-width: 28px; }
+
   .keyHint {
     color: var(--fg-hint);
     font-size: 13px;
@@ -453,6 +469,8 @@
   /* ===== スマホ向け（狭い画面）調整 ===== */
   @media (max-width: 700px) {
     .keyHint { display: none; }   /* ソフトキーボードには不要 */
+    .faceBtn { padding: 10px 12px; }
+    body.barCollapsed #dragHandle span { width: 70px; }  /* 格納時は面ボタンと重ならないよう短く */
     #memoBar .label { display: none; }    /* スマホでは「メモの文字」ラベルは省略 */
     #memoBar .sizeVal { display: none; }  /* スマホでは数値表示も省略(＋−⇅の3ボタンのみ) */
     /* メモタブは小さく・最上部に・半透明にして筆談表示を邪魔しない */
@@ -494,9 +512,14 @@
       <span class="sizeVal" id="topSizeVal">128</span>
       <button id="topPlus">A＋</button>
     </div>
+    <div class="ctrlGroup" id="faceCtrl">
+      <span class="label">面</span>
+      <button class="faceBtn active" data-face="0">❶</button>
+      <button class="faceBtn" data-face="1">②</button>
+    </div>
     <button id="clearBtn">クリア</button>
     <button id="themeBtn">◐ 反転</button>
-    <button id="modeBtn">1画面</button>
+    <button id="modeBtn">1画面表示</button>
     <button id="recBtn">● 記録</button>
     <div class="ctrlGroup" id="colorCtrl">
       <span class="label">文字色</span>
@@ -583,7 +606,7 @@
   function applyMode() {
     const solo = (state.mode === 'solo');
     document.body.classList.toggle('solo', solo);
-    document.getElementById('modeBtn').textContent = solo ? '2画面' : '1画面';
+    document.getElementById('modeBtn').textContent = solo ? '2画面表示' : '1画面表示';
     document.getElementById('botLabel').textContent = solo ? '文字' : '下の文字';
     applySizes();
   }
@@ -654,6 +677,11 @@
   const COLOR_VALUES = { red: 'var(--c-red)', blue: 'var(--c-blue)', green: 'var(--c-green)' };
   let runs = [{ start: 0, color: state.color }];
   let prevText = '';
+
+  // ---- 筆談の面(2枚) ----
+  // 表示中の面は入力欄そのもの。表示中でない面の内容と色区間はfaceStoreに退避しておく
+  let curFace = 0;
+  const faceStore = [{ text: '', runs: null }, { text: '', runs: null }];
 
   function escapeHtml(s) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -739,12 +767,12 @@
   let rec = null;  // {start: 開始時刻, entries: [{time, text}]}
 
   function recSaveBackup() {
-    if (rec) localStorage.setItem(REC_KEY, JSON.stringify({ start: rec.start, entries: rec.entries, pending: inputArea.value, pendingMemo: memoInput.value }));
+    if (rec) localStorage.setItem(REC_KEY, JSON.stringify({ start: rec.start, entries: rec.entries, pending: inputArea.value, pendingOther: faceStore[1 - curFace].text, curFace: curFace, pendingMemo: memoInput.value }));
   }
 
   function recSnapshot() {
     if (!rec) return;
-    if (inputArea.value.trim()) rec.entries.push({ time: Date.now(), text: inputArea.value });
+    if (inputArea.value.trim()) rec.entries.push({ time: Date.now(), text: inputArea.value, face: curFace + 1 });
     recSaveBackup();
   }
 
@@ -756,7 +784,7 @@
 
   function recDownload() {
     const body = rec.entries.length
-      ? rec.entries.map(e => '----------\n[' + fmtTime(e.time) + ']\n' + e.text).join('\n')
+      ? rec.entries.map(e => '----------\n[' + fmtTime(e.time) + ']' + (e.face ? ' [面' + e.face + ']' : '') + '\n' + e.text).join('\n')
       : '（記録された文字はありませんでした）';
     const memoSection = memoInput.value.trim() ? '\n----------\n[メモ]\n' + memoInput.value : '';
     const content = '﻿筆談ログ（開始 ' + fmtTime(rec.start) + '）\n' + body + memoSection + '\n';
@@ -782,6 +810,9 @@
       recSaveBackup();
     } else {
       recSnapshot();
+      // 裏に回っている面の内容もログに含める
+      const otherText = faceStore[1 - curFace].text;
+      if (otherText.trim()) rec.entries.push({ time: Date.now(), text: otherText, face: 2 - curFace });
       recDownload();
       rec = null;
       localStorage.removeItem(REC_KEY);
@@ -797,7 +828,9 @@
     try {
       const b = JSON.parse(saved);
       rec = { start: b.start, entries: b.entries || [] };
-      if (b.pending && b.pending.trim()) rec.entries.push({ time: b.start, text: b.pending });
+      const cf = (b.curFace === 1) ? 1 : 0;
+      if (b.pending && b.pending.trim()) rec.entries.push({ time: b.start, text: b.pending, face: cf + 1 });
+      if (b.pendingOther && b.pendingOther.trim()) rec.entries.push({ time: b.start, text: b.pendingOther, face: 2 - cf });
     } catch (e) { localStorage.removeItem(REC_KEY); }
   })();
 
@@ -811,6 +844,37 @@
     inputArea.focus();
   }
   document.getElementById('clearBtn').addEventListener('click', clearAll);
+
+  // ---- 面の切り替え(表示中の面を退避し、もう一方を読み込む) ----
+  function applyFaceButtons() {
+    document.querySelectorAll('.faceBtn').forEach(b => {
+      const i = Number(b.dataset.face);
+      const on = (i === curFace);
+      b.classList.toggle('active', on);
+      b.textContent = (i === 0) ? (on ? '❶' : '①') : (on ? '❷' : '②');
+    });
+  }
+  function switchFace(n) {
+    if (n !== curFace) {
+      faceStore[curFace] = { text: inputArea.value, runs: runs };
+      curFace = n;
+      const f = faceStore[n];
+      inputArea.value = f.text;
+      prevText = f.text;
+      runs = f.runs || [{ start: 0, color: state.color }];
+      // 話者の色は面をまたいで共通なので、続きの入力は今の色で始める
+      addBoundaryIn(runs, inputArea.value.length, state.color);
+      faceStore[n] = { text: '', runs: null };
+      renderAll();
+      applyFaceButtons();
+      recSaveBackup();
+    }
+    inputArea.focus();
+    inputArea.setSelectionRange(inputArea.value.length, inputArea.value.length);
+    setActive(false);
+  }
+  document.querySelectorAll('.faceBtn').forEach(b =>
+    b.addEventListener('click', () => switchFace(Number(b.dataset.face))));
 
   // ---- ESCキーで画面点滅（注意喚起）、DELキーで一括削除 ----
   const flash = document.getElementById('flash');
